@@ -1,0 +1,13 @@
+version: "3.5"
+
+services:
+  calibre-server:
+    build: .
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./recipes:${RECIPES_FOLDER}
+      - ./users.sqlite:#{USER_DB}
+      # optionally map library as well, so ebooks persist
+      - ./library:#{LIBRARY_FOLDER}

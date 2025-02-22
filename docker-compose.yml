@@ -7,7 +7,6 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./recipes:${RECIPES_FOLDER}
-      - ./users.sqlite:#{USER_DB}
-      # optionally map library as well, so ebooks persist
-      - ./library:#{LIBRARY_FOLDER}
+      - ./recipes:/opt/recipes
+      - ./users.sqlite:/opt/users.sqlite
+      - ./library:/opt/library

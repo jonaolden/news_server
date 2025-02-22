@@ -9,7 +9,7 @@ echo "Setting up cron job with schedule: $CRON_TIME"
 crontab -l 2>/dev/null | grep -v "download_news.sh" > /tmp/current_cron
 
 # Add the new line:
-echo "$CRON_TIME bash /opt/download_news.sh "http://127.0.0.1:8080"" >> /tmp/current_cron
+echo "$CRON_TIME bash /opt/download_news.sh 'http://127.0.0.1:8080'" >> /tmp/current_cron
 
 crontab /tmp/current_cron
 

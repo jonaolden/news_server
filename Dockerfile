@@ -1,39 +1,57 @@
 # Dockerfile
 
-# Pull an Ubuntu base image (arm64 example, can remove if you prefer x86)
-FROM --platform=linux/arm64 ubuntu:latest
+# Pull a specific Ubuntu base image version for better reproducibility
+FROM --platform=linux/arm64 ubuntu:22.04
 
 # Set up non-interactive mode for apt
 ENV DEBIAN_FRONTEND=noninteractive
 ENV DEBCONF_NONINTERACTIVE_SEEN=true
 
-# Install packages (including git)
-RUN apt-get update &&     apt-get install -y calibre wget cron git &&     apt-get clean && rm -rf /var/lib/apt/lists/*
+# Set environment variables for paths
+ENV LIBRARY_FOLDER=/opt/library
+ENV RECIPES_FOLDER=/opt/recipes
+ENV USER_DB=/opt/users.sqlite
 
-# Copy in scripts
+# Install packages (including git and python dependencies for recipes)
+RUN apt-get update && \
+    apt-get install -y calibre=5.* wget cron git python3-pip curl && \
+    pip3 install beautifulsoup4 lxml && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Create needed folders
+RUN mkdir -p $LIBRARY_FOLDER $RECIPES_FOLDER /opt/example
+
+# Copy in scripts first (for better layer caching)
 COPY entrypoint.sh /entrypoint.sh
 COPY download_news.sh /opt/download_news.sh
 COPY setup_cron.sh /opt/setup_cron.sh
 RUN chmod +x /entrypoint.sh /opt/download_news.sh /opt/setup_cron.sh
 
-# Create needed folders (defined in .env but we create them anyway)
-ARG LIBRARY_FOLDER=/opt/library
-ARG RECIPES_FOLDER=/opt/recipes
-ARG EBOOK_EXAMPLE_FOLDER=/opt/example
-ARG USER_DB=/opt/users.sqlite
+# Install a dummy book to initialize library
+RUN wget https://www.gutenberg.org/ebooks/100.kf8.images -O /opt/example/example.mobi && \
+    calibredb add /opt/example/* --with-library $LIBRARY_FOLDER && \
+    calibredb remove 1 --with-library $LIBRARY_FOLDER && \
+    rm -rf /opt/example
 
-RUN mkdir -p $LIBRARY_FOLDER $RECIPES_FOLDER $EBOOK_EXAMPLE_FOLDER
-
-# Install a dummy book, then remove it to initialize library
-RUN wget https://www.gutenberg.org/ebooks/100.kf8.images -O $EBOOK_EXAMPLE_FOLDER/example.mobi &&     calibredb add $EBOOK_EXAMPLE_FOLDER/* --with-library $LIBRARY_FOLDER &&     calibredb remove 1 --with-library $LIBRARY_FOLDER 
-
-# Copy default local user DB (optional if you want it inside container)
+# Copy recipes and user database
+COPY recipes/ $RECIPES_FOLDER/
 COPY users.sqlite $USER_DB
+
+# Create a non-root user for better security
+RUN groupadd -r calibre && \
+    useradd -r -g calibre calibre && \
+    chown -R calibre:calibre $LIBRARY_FOLDER $RECIPES_FOLDER $USER_DB && \
+    chmod -R 755 $LIBRARY_FOLDER $RECIPES_FOLDER
 
 # Expose the calibre-server port
 EXPOSE 8080
 
+# Add a health check to verify the service is running
+HEALTHCHECK --interval=30s --timeout=5s \
+  CMD curl -f http://localhost:8080/ || exit 1
+
+# Switch to non-root user
+USER calibre
+
 # Default entrypoint
-ENTRYPOINT [
-/entrypoint.sh
-]
+ENTRYPOINT ["/entrypoint.sh"]

@@ -71,7 +71,7 @@ for filename in $RECIPES_PATH/*.recipe; do
         echo "Found existing entries for $basename. Removing them before adding new version."
         for book_id in $book_ids; do
             echo "Removing book ID $book_id"
-            calibredb remove --with-library="$LIBRARY_PATH" "$book_id" || echo "[WARNING] Failed to remove book ID $book_id"
+            calibredb remove --with-library="$LIBRARY_PATH" --permanent "$book_id" || echo "[WARNING] Failed to remove book ID $book_id"
         done
     fi
 

@@ -22,5 +22,6 @@ bash /opt/setup_cron.sh
 # Execute as calibre user
 su - calibre -c "bash /opt/download_news.sh"
 
-# 3. Start calibre-server as calibre user
-su - calibre -c "calibre-server '$LIBRARY_FOLDER' --enable-auth --userdb '$USER_DB'"
+# 3. Start calibre-server as calibre user - make sure to use double quotes for variable expansion
+# and NO quotes around variables to allow proper expansion
+su - calibre -c "calibre-server $LIBRARY_FOLDER --enable-auth --userdb $USER_DB"

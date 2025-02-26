@@ -10,6 +10,9 @@ CALIBRE_PASSWORD="${CALIBRE_PASSWORD:-admin}"
 DUP_STRATEGY="${DUPLICATE_STRATEGY:-new_record}"
 REPO_URL="${GITHUB_REPO_URL}"
 
+echo "[INFO] Using library path: $LIBRARY_PATH"
+echo "[INFO] Using recipes path: $RECIPES_PATH"
+
 # 1. If GitHub repository is defined, clone or pull
 if [ -n "$REPO_URL" ]; then
     if [ -d "$RECIPES_PATH/.git" ]; then
@@ -26,15 +29,23 @@ fi
 for filename in $RECIPES_PATH/*.recipe; do
     [ -e "$filename" ] || continue  # Skip if no .recipe files
 
-    echo "Converting recipe $filename to MOBI $filename.mobi"
-    ebook-convert "$filename" "$filename.mobi" --output-profile=kindle
+    basename=$(basename "$filename" .recipe)
+    output_mobi="$RECIPES_PATH/$basename.mobi"
+    
+    echo "Converting recipe $filename to MOBI $output_mobi"
+    ebook-convert "$filename" "$output_mobi" --output-profile=kindle
 
-    echo "Annotating MOBI $filename.mobi with 'dailynews' tag"
-    ebook-meta "$filename.mobi" --tag "dailynews"
+    echo "Annotating MOBI $output_mobi with 'dailynews' tag"
+    ebook-meta "$output_mobi" --tag "dailynews"
 
-    echo "Adding MOBI $filename.mobi to the library at $LIBRARY_PATH"
-    calibredb add "$filename.mobi"         --library-path "$1"         --username "$CALIBRE_USER"         --password "$CALIBRE_PASSWORD"         --automerge "$DUP_STRATEGY"
+    echo "Adding MOBI $output_mobi to the library at $LIBRARY_PATH"
+    calibredb add "$output_mobi" \
+        --with-library="$LIBRARY_PATH" \
+        --username="$CALIBRE_USER" \
+        --password="$CALIBRE_PASSWORD" \
+        --automerge="$DUP_STRATEGY"
 done
 
-# 3. Clean up leftover epub files, if any
-rm -f $RECIPES_PATH/*.epub
+# 3. Clean up leftover mobi files to avoid duplicates next time
+echo "Cleaning up temporary MOBI files"
+rm -f $RECIPES_PATH/*.mobi

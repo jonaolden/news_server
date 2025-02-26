@@ -7,6 +7,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./recipes:/opt/recipes
-      - ./users.sqlite:/opt/users.sqlite
-      - ./library:/opt/library
+      - ./recipes:/opt/recipes:rw
+      - ./users.sqlite:/opt/users.sqlite:rw
+      - ./library:/opt/library:rw
+    user: root  # Start as root to ensure permissions work

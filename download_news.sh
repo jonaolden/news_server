@@ -62,10 +62,22 @@ for filename in $RECIPES_PATH/*.recipe; do
     echo "Annotating EPUB $output_epub with 'dailynews' tag"
     ebook-meta "$output_epub" --tag "dailynews" || echo "[WARNING] Failed to add tag to $output_epub"
 
+    # First check for and remove existing entries with the same title
+    echo "Checking for existing entries of $basename in the library"
+    # Get list of book IDs that match the title pattern
+    book_ids=$(calibredb list --with-library="$LIBRARY_PATH" --search="title:\"$basename\"" --fields="id" | grep -o '[0-9]\+' || echo "")
+    
+    if [ ! -z "$book_ids" ]; then
+        echo "Found existing entries for $basename. Removing them before adding new version."
+        for book_id in $book_ids; do
+            echo "Removing book ID $book_id"
+            calibredb remove --with-library="$LIBRARY_PATH" "$book_id" || echo "[WARNING] Failed to remove book ID $book_id"
+        done
+    fi
+
     echo "Adding EPUB $output_epub to the library at $LIBRARY_PATH"
     calibredb add "$output_epub" \
-        --with-library="$LIBRARY_PATH" \
-        --automerge="$DUP_STRATEGY" || echo "[WARNING] Failed to add $output_epub to library"
+        --with-library="$LIBRARY_PATH" || echo "[WARNING] Failed to add $output_epub to library"
 done
 
 # 3. Clean up leftover epub files to avoid duplicates next time

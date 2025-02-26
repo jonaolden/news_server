@@ -23,8 +23,4 @@ bash /opt/setup_cron.sh
 su - calibre -c "bash /opt/download_news.sh"
 
 # 3. Start calibre-server as calibre user
-su - calibre -c "calibre-server '$LIBRARY_FOLDER' \
-  --enable-auth \
-  --userdb '$USER_DB' \
-  --username='$CALIBRE_USER' \
-  --password='$CALIBRE_PASSWORD'"
+su - calibre -c "calibre-server '$LIBRARY_FOLDER' --enable-auth --userdb '$USER_DB'"

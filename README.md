@@ -4,27 +4,30 @@ This project manages a Docker container running a Calibre server that downloads 
 
 ## Quick Start
 
-#1. **Set Up .env**  
+1. **Set Up .env**  
 Create a file named .env in the repository root. Copy the contents from .env.example (if provided) or create your own, specifying values for the following:
 
 ```bash
 CRON_TIME="0 6 * * * *"
 
-GITHB_REPO_URL="https://github.com/username/my-recipe-repo.git"
+GITHUB_REPO_URL="https://github.com/username/my-recipe-repo.git"
 
 CALIBRE_USER="admin"
-CALIBRE_PASSWORD=you_secure_password
+CALIBRE_PASSWORD=your_secure_password
 ```
 
-#2. **Run Docker Compose**
+2. **Run Docker Compose**
 
 ```bash
 docker-compose up --build
 ```
 
-"3# Access the Server"
+3. **Access the Server**
 
-The Calibre server is exposed on port 8080, so visit [ http://localhost:8080 ] (adjust if you’re running Docker on another host))
-.library folder is mounted to /opt/library for data persistence.
+The Calibre server is exposed on port 8080, so visit [http://localhost:8080](http://localhost:8080) (adjust if you're running Docker on another host)
+The library folder is mounted to /opt/library for data persistence.
 
-- "** Automatic Recipe Updates **"\n    * A cron job runs at the schedule specified in CRON_TIME.\n    * Before converting recipes, it will do a git pull if you have provided a GitHub reposito."
+## Automatic Recipe Updates
+
+* A cron job runs at the schedule specified in CRON_TIME.
+* Before converting recipes, it will do a git pull if you have provided a GitHub repository.

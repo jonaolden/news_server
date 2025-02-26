@@ -43,33 +43,31 @@ for filename in $RECIPES_PATH/*.recipe; do
     [ -e "$filename" ] || continue  # Skip if no .recipe files
 
     basename=$(basename "$filename" .recipe)
-    output_mobi="$RECIPES_PATH/$basename.mobi"
+    output_epub="$RECIPES_PATH/$basename.epub"
     
-    echo "Converting recipe $filename to MOBI $output_mobi"
+    echo "Converting recipe $filename to EPUB $output_epub"
     # Ensure we have write permission to the output file
-    touch "$output_mobi" || { echo "[ERROR] Cannot create $output_mobi - check permissions"; exit 1; }
+    touch "$output_epub" || { echo "[ERROR] Cannot create $output_epub - check permissions"; exit 1; }
     
-    ebook-convert "$filename" "$output_mobi" --output-profile=kindle || { 
+    ebook-convert "$filename" "$output_epub" || { 
         echo "[ERROR] Conversion failed for $filename";
         continue;  # Try next recipe instead of failing completely
     }
 
-    if [ ! -f "$output_mobi" ]; then
-        echo "[ERROR] Conversion produced no output file: $output_mobi"
+    if [ ! -f "$output_epub" ]; then
+        echo "[ERROR] Conversion produced no output file: $output_epub"
         continue
     fi
 
-    echo "Annotating MOBI $output_mobi with 'dailynews' tag"
-    ebook-meta "$output_mobi" --tag "dailynews" || echo "[WARNING] Failed to add tag to $output_mobi"
+    echo "Annotating EPUB $output_epub with 'dailynews' tag"
+    ebook-meta "$output_epub" --tag "dailynews" || echo "[WARNING] Failed to add tag to $output_epub"
 
-    echo "Adding MOBI $output_mobi to the library at $LIBRARY_PATH"
-    calibredb add "$output_mobi" \
+    echo "Adding EPUB $output_epub to the library at $LIBRARY_PATH"
+    calibredb add "$output_epub" \
         --with-library="$LIBRARY_PATH" \
-        --username="$CALIBRE_USER" \
-        --password="$CALIBRE_PASSWORD" \
-        --automerge="$DUP_STRATEGY" || echo "[WARNING] Failed to add $output_mobi to library"
+        --automerge="$DUP_STRATEGY" || echo "[WARNING] Failed to add $output_epub to library"
 done
 
-# 3. Clean up leftover mobi files to avoid duplicates next time
-echo "Cleaning up temporary MOBI files"
-find $RECIPES_PATH -name "*.mobi" -delete || echo "[WARNING] Failed to clean up MOBI files"
+# 3. Clean up leftover epub files to avoid duplicates next time
+echo "Cleaning up temporary EPUB files"
+find $RECIPES_PATH -name "*.epub" -delete || echo "[WARNING] Failed to clean up EPUB files"

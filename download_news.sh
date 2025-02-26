@@ -1,85 +1,84 @@
 #!/bin/bash
 
-# This script is run by cron or manually.
+# This script removes duplicate publications in the Calibre library,
+# keeping only the newest version of each publication.
+
 set -e  # Exit on any error
 set -o pipefail  # Pipe fails if any command fails
 
-# Pull the environment variables we need.
+# Use environment variables if available, otherwise use defaults
 LIBRARY_PATH="${LIBRARY_FOLDER:-/opt/library}"
-RECIPES_PATH="${RECIPES_FOLDER:-/opt/recipes}"
-CALIBRE_USER="${CALIBRE_USER:-admin}"
-CALIBRE_PASSWORD="${CALIBRE_PASSWORD:-admin}"
-DUP_STRATEGY="${DUPLICATE_STRATEGY:-new_record}"
-REPO_URL="${GITHUB_REPO_URL}"
 
 echo "[INFO] Using library path: $LIBRARY_PATH"
-echo "[INFO] Using recipes path: $RECIPES_PATH"
 
-# Check if directories are writable
-if [ ! -w "$RECIPES_PATH" ]; then
-    echo "[ERROR] Cannot write to $RECIPES_PATH - check permissions"
+# Check if the library is accessible
+if [ ! -d "$LIBRARY_PATH" ]; then
+    echo "[ERROR] Library path $LIBRARY_PATH does not exist"
     exit 1
 fi
 
-if [ ! -w "$LIBRARY_PATH" ]; then
-    echo "[ERROR] Cannot write to $LIBRARY_PATH - check permissions"
-    exit 1
-fi
+# Get a list of all publication base names (without numbering)
+echo "[INFO] Finding duplicate publications..."
+# List all books and extract titles with their IDs
+book_list=$(calibredb list --with-library="$LIBRARY_PATH" --fields="id,title" | tail -n +2)
 
-# 1. If GitHub repository is defined, clone or pull
-if [ -n "$REPO_URL" ]; then
-    if [ -d "$RECIPES_PATH/.git" ]; then
-        echo "[INFO] Found existing git repo in $RECIPES_PATH. Pulling latest..."
-        cd $RECIPES_PATH && git pull
-    else
-        echo "[INFO] Cloning git repo: $REPO_URL into $RECIPES_PATH"
-        rm -rf "$RECIPES_PATH"/* # clean out any old non-git files
-        git clone "$REPO_URL" "$RECIPES_PATH"
-    fi
-fi
-
-# 2. Convert recipes and add to library
-for filename in $RECIPES_PATH/*.recipe; do
-    [ -e "$filename" ] || continue  # Skip if no .recipe files
-
-    basename=$(basename "$filename" .recipe)
-    output_epub="$RECIPES_PATH/$basename.epub"
+# Extract base names by removing trailing patterns like " (1)", " (2)", etc.
+echo "$book_list" | while read -r line; do
+    # Extract ID and full title
+    id=$(echo "$line" | awk '{print $1}')
+    title=$(echo "$line" | cut -d ' ' -f 2-)
     
-    echo "Converting recipe $filename to EPUB $output_epub"
-    # Ensure we have write permission to the output file
-    touch "$output_epub" || { echo "[ERROR] Cannot create $output_epub - check permissions"; exit 1; }
+    # Extract base name by removing trailing pattern like " (1)", " (2)", etc.
+    base_title=$(echo "$title" | sed -E 's/ \([0-9]+\)$//')
     
-    ebook-convert "$filename" "$output_epub" || { 
-        echo "[ERROR] Conversion failed for $filename";
-        continue;  # Try next recipe instead of failing completely
-    }
+    # Output ID, full title, and base title for processing
+    echo "$id|$title|$base_title"
+done > /tmp/book_data.txt
 
-    if [ ! -f "$output_epub" ]; then
-        echo "[ERROR] Conversion produced no output file: $output_epub"
+# Process the data to identify duplicates
+echo "[INFO] Processing duplicates..."
+cat /tmp/book_data.txt | awk -F'|' '{print $3}' | sort | uniq > /tmp/unique_base_titles.txt
+
+# For each base title, find all occurrences and keep only the newest one
+while read -r base_title; do
+    # Skip empty lines
+    [ -z "$base_title" ] && continue
+    
+    echo "[INFO] Processing duplicates of: $base_title"
+    
+    # Find all IDs for this base title
+    grep "|$base_title\$" /tmp/book_data.txt | grep -v "|$base_title|$base_title\$" > /tmp/matches.txt
+    grep "|$base_title|$base_title\$" /tmp/book_data.txt >> /tmp/matches.txt
+    
+    # If there's only one or no matches, continue to next base title
+    match_count=$(wc -l < /tmp/matches.txt)
+    if [ "$match_count" -le 1 ]; then
+        echo "[INFO] No duplicates found for: $base_title"
         continue
     fi
-
-    echo "Annotating EPUB $output_epub with 'dailynews' tag"
-    ebook-meta "$output_epub" --tag "dailynews" || echo "[WARNING] Failed to add tag to $output_epub"
-
-    # First check for and remove existing entries with the same title
-    echo "Checking for existing entries of $basename in the library"
-    # Get list of book IDs that match the title pattern
-    book_ids=$(calibredb list --with-library="$LIBRARY_PATH" --search="title:\"$basename\"" --fields="id" | grep -o '[0-9]\+' || echo "")
     
-    if [ ! -z "$book_ids" ]; then
-        echo "Found existing entries for $basename. Removing them before adding new version."
-        for book_id in $book_ids; do
-            echo "Removing book ID $book_id"
-            calibredb remove --with-library="$LIBRARY_PATH" --permanent "$book_id" || echo "[WARNING] Failed to remove book ID $book_id"
-        done
-    fi
+    # Sort by ID in descending order and keep only the first one (newest)
+    cat /tmp/matches.txt | sort -t'|' -k1,1nr > /tmp/sorted_matches.txt
+    
+    # Extract the newest ID (first in sorted list)
+    newest_id=$(head -1 /tmp/sorted_matches.txt | cut -d'|' -f1)
+    newest_title=$(head -1 /tmp/sorted_matches.txt | cut -d'|' -f2)
+    
+    echo "[INFO] Keeping newest version: $newest_id - $newest_title"
+    
+    # Get IDs to remove (all except the newest)
+    tail -n +2 /tmp/sorted_matches.txt | cut -d'|' -f1 > /tmp/ids_to_remove.txt
+    
+    # Remove duplicates
+    while read -r id_to_remove; do
+        title_to_remove=$(grep "^$id_to_remove|" /tmp/book_data.txt | cut -d'|' -f2)
+        echo "[INFO] Removing duplicate: $id_to_remove - $title_to_remove"
+        # Use --permanent flag to bypass the recycle bin
+        calibredb remove --with-library="$LIBRARY_PATH" --permanent "$id_to_remove" || echo "[WARNING] Failed to remove book ID $id_to_remove"
+    done < /tmp/ids_to_remove.txt
+done < /tmp/unique_base_titles.txt
 
-    echo "Adding EPUB $output_epub to the library at $LIBRARY_PATH"
-    calibredb add "$output_epub" \
-        --with-library="$LIBRARY_PATH" || echo "[WARNING] Failed to add $output_epub to library"
-done
+# Clean up temporary files
+rm -f /tmp/book_data.txt /tmp/unique_base_titles.txt /tmp/matches.txt /tmp/sorted_matches.txt /tmp/ids_to_remove.txt
 
-# 3. Clean up leftover epub files to avoid duplicates next time
-echo "Cleaning up temporary EPUB files"
-find $RECIPES_PATH -name "*.epub" -delete || echo "[WARNING] Failed to clean up EPUB files"
+echo "[INFO] Duplicate cleanup completed successfully!"

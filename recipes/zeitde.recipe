@@ -1,13 +1,16 @@
-# Zeit.de Recipe
+#!/usr/bin/env python
+# encoding: utf-8
+
+from calibre.web.feeds.news import BasicNewsRecipe
 
 class ZeitDe(BasicNewsRecipe):
     title = u'Zeit.de'
     oldest_article = 7
     max_articles_per_feed = 100
-
+    
     def get_cover_url(self):
         return 'https://www.zeit.de/favicon.ico'
-
+    
     feeds = [
         ('Zeit Online', 'https://newsfeed.zeit.de/index'),
     ]

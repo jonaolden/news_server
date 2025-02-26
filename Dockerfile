@@ -37,10 +37,11 @@ RUN wget https://www.gutenberg.org/ebooks/100.kf8.images -O /opt/example/example
 COPY recipes/ $RECIPES_FOLDER/
 COPY users.sqlite $USER_DB
 
-# Create a non-root user for better security
+# Create a non-root user for better security and set up a proper home directory
 RUN groupadd -r calibre && \
-    useradd -r -g calibre calibre && \
-    chown -R calibre:calibre $LIBRARY_FOLDER $RECIPES_FOLDER $USER_DB && \
+    useradd -r -g calibre -m -d /home/calibre calibre && \
+    mkdir -p /home/calibre/.config/calibre && \
+    chown -R calibre:calibre $LIBRARY_FOLDER $RECIPES_FOLDER $USER_DB /home/calibre && \
     chmod -R 755 $LIBRARY_FOLDER $RECIPES_FOLDER
 
 # Expose the calibre-server port
@@ -49,9 +50,6 @@ EXPOSE 8080
 # Add a health check to verify the service is running
 HEALTHCHECK --interval=30s --timeout=5s \
   CMD curl -f http://localhost:8080/ || exit 1
-
-# Switch to non-root user
-USER calibre
 
 # Default entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

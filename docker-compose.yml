@@ -1,8 +1,11 @@
-version: "3.5"
+version: "3.8"
 
 services:
   calibre-server:
     build: .
+    image: news-server:latest
+    container_name: news-server
+    restart: unless-stopped
     env_file: .env
     ports:
       - "8080:8080"
@@ -10,4 +13,13 @@ services:
       - ./recipes:/opt/recipes:rw
       - ./users.sqlite:/opt/users.sqlite:rw
       - ./library:/opt/library:rw
+      - ./logs:/var/log/news_server:rw
     user: root  # Start as root to ensure permissions work
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    environment:
+      - TZ=${TZ:-UTC}

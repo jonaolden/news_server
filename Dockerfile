@@ -1,7 +1,7 @@
 # Dockerfile
 
-# Pull a specific Ubuntu base image version for better reproducibility
-FROM --platform=linux/arm64 ubuntu:22.04
+# Use a specific Debian version for better stability
+FROM debian:bullseye-slim
 
 # Set up non-interactive mode for apt
 ENV DEBIAN_FRONTEND=noninteractive
@@ -11,24 +11,37 @@ ENV DEBCONF_NONINTERACTIVE_SEEN=true
 ENV LIBRARY_FOLDER=/opt/library
 ENV RECIPES_FOLDER=/opt/recipes
 ENV USER_DB=/opt/users.sqlite
+ENV LOG_DIR=/var/log/news_server
 
-# Install packages (including git and python dependencies for recipes)
+# Install packages (including git, python dependencies for recipes, and health checking tools)
 RUN apt-get update && \
-    apt-get install -y calibre=5.* wget cron git python3-pip curl && \
-    pip3 install beautifulsoup4 lxml && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        calibre \
+        wget \
+        cron \
+        git \
+        python3-pip \
+        curl \
+        ca-certificates \
+        procps \
+        tzdata && \
+    pip3 install --no-cache-dir beautifulsoup4 lxml && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create needed folders
-RUN mkdir -p $LIBRARY_FOLDER $RECIPES_FOLDER /opt/example
+# Create needed folders with proper permissions
+RUN mkdir -p $LIBRARY_FOLDER $RECIPES_FOLDER $LOG_DIR /opt/example && \
+    chmod 755 $LIBRARY_FOLDER $RECIPES_FOLDER $LOG_DIR
 
 # Copy in scripts first (for better layer caching)
 COPY entrypoint.sh /entrypoint.sh
 COPY download_news.sh /opt/download_news.sh
+COPY cleanup_duplicates.sh /opt/cleanup_duplicates.sh
 COPY setup_cron.sh /opt/setup_cron.sh
-RUN chmod +x /entrypoint.sh /opt/download_news.sh /opt/setup_cron.sh
+RUN chmod +x /entrypoint.sh /opt/download_news.sh /opt/cleanup_duplicates.sh /opt/setup_cron.sh
 
 # Install a dummy book to initialize library
-RUN wget https://www.gutenberg.org/ebooks/100.kf8.images -O /opt/example/example.mobi && \
+RUN wget --no-verbose https://www.gutenberg.org/ebooks/100.kf8.images -O /opt/example/example.mobi && \
     calibredb add /opt/example/* --with-library $LIBRARY_FOLDER && \
     calibredb remove 1 --with-library $LIBRARY_FOLDER && \
     rm -rf /opt/example
@@ -41,14 +54,17 @@ COPY users.sqlite $USER_DB
 RUN groupadd -r calibre && \
     useradd -r -g calibre -m -d /home/calibre calibre && \
     mkdir -p /home/calibre/.config/calibre && \
-    chown -R calibre:calibre $LIBRARY_FOLDER $RECIPES_FOLDER $USER_DB /home/calibre && \
-    chmod -R 755 $LIBRARY_FOLDER $RECIPES_FOLDER
+    chown -R calibre:calibre $LIBRARY_FOLDER $RECIPES_FOLDER $USER_DB /home/calibre $LOG_DIR && \
+    chmod -R 755 $LIBRARY_FOLDER $RECIPES_FOLDER $LOG_DIR
+
+# Set proper timezone handling
+ENV TZ=UTC
 
 # Expose the calibre-server port
 EXPOSE 8080
 
 # Add a health check to verify the service is running
-HEALTHCHECK --interval=30s --timeout=5s \
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:8080/ || exit 1
 
 # Default entrypoint

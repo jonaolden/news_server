@@ -38,7 +38,8 @@ COPY entrypoint.sh /entrypoint.sh
 COPY download_news.sh /opt/download_news.sh
 COPY cleanup_duplicates.sh /opt/cleanup_duplicates.sh
 COPY setup_cron.sh /opt/setup_cron.sh
-RUN chmod +x /entrypoint.sh /opt/download_news.sh /opt/cleanup_duplicates.sh /opt/setup_cron.sh
+COPY healthcheck.sh /opt/healthcheck.sh
+RUN chmod +x /entrypoint.sh /opt/download_news.sh /opt/cleanup_duplicates.sh /opt/setup_cron.sh /opt/healthcheck.sh
 
 # Install a dummy book to initialize library
 RUN wget --no-verbose https://www.gutenberg.org/ebooks/100.kf8.images -O /opt/example/example.mobi && \
@@ -65,7 +66,7 @@ EXPOSE 8080
 
 # Add a health check to verify the service is running
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-  CMD curl -f http://localhost:8080/ || exit 1
+  CMD ["/opt/healthcheck.sh"]
 
 # Default entrypoint
 ENTRYPOINT ["/entrypoint.sh"]

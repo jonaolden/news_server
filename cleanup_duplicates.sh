@@ -8,76 +8,127 @@ set -o pipefail  # Pipe fails if any command fails
 
 # Use environment variables if available, otherwise use defaults
 LIBRARY_PATH="${LIBRARY_FOLDER:-/opt/library}"
+LOG_FILE="${LOG_FILE:-/var/log/cleanup_duplicates.log}"
 
-echo "[INFO] Using library path: $LIBRARY_PATH"
+# Function for logging with timestamps
+log() {
+    local level="$1"
+    local message="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" | tee -a "$LOG_FILE"
+}
+
+log "INFO" "Starting duplicate cleanup process"
+log "INFO" "Using library path: $LIBRARY_PATH"
+
+# Create log directory if it doesn't exist
+LOG_DIR=$(dirname "$LOG_FILE")
+if [ ! -d "$LOG_DIR" ]; then
+    mkdir -p "$LOG_DIR" || {
+        log "ERROR" "Cannot create log directory $LOG_DIR"
+        # Continue anyway, logging to stdout
+    }
+fi
 
 # Check if the library is accessible
 if [ ! -d "$LIBRARY_PATH" ]; then
-    echo "[ERROR] Library path $LIBRARY_PATH does not exist"
+    log "ERROR" "Library path $LIBRARY_PATH does not exist"
     exit 1
 fi
 
-# Get a list of all publication base names (without numbering)
-echo "[INFO] Finding duplicate publications..."
-# List all books and extract titles with their IDs
-book_list=$(calibredb list --with-library="$LIBRARY_PATH" --fields="id,title" | tail -n +2)
+if [ ! -r "$LIBRARY_PATH" ]; then
+    log "ERROR" "Cannot read from $LIBRARY_PATH - check permissions"
+    exit 1
+fi
 
-# Extract base names by removing trailing patterns like " (1)", " (2)", etc.
-echo "$book_list" | while read -r line; do
+# Create a secure temp directory for our work
+TEMP_DIR=$(mktemp -d)
+if [ ! -d "$TEMP_DIR" ]; then
+    log "ERROR" "Failed to create temporary directory"
+    exit 1
+fi
+
+# Ensure temp files get cleaned up on exit
+cleanup() {
+    rm -rf "$TEMP_DIR"
+    log "INFO" "Cleaned up temporary files"
+}
+trap cleanup EXIT
+
+# Get a list of all books in the library
+log "INFO" "Retrieving book list from Calibre library"
+if ! calibredb list --with-library="$LIBRARY_PATH" --fields="id,title" > "$TEMP_DIR/full_book_list.txt"; then
+    log "ERROR" "Failed to retrieve book list from Calibre"
+    exit 1
+fi
+
+# Skip header line and process each book
+tail -n +2 "$TEMP_DIR/full_book_list.txt" | while read -r line; do
     # Extract ID and full title
     id=$(echo "$line" | awk '{print $1}')
     title=$(echo "$line" | cut -d ' ' -f 2-)
     
-    # Extract base name by removing trailing pattern like " (1)", " (2)", etc.
-    base_title=$(echo "$title" | sed -E 's/ \([0-9]+\)$//')
+    # Extract publication name (everything before the date)
+    # Assuming format like "Publication - YYYY.MM.DD"
+    pub_name=$(echo "$title" | sed -E 's/ - [0-9]{4}\.[0-9]{2}\.[0-9]{2}.*$//')
     
-    # Output ID, full title, and base title for processing
-    echo "$id|$title|$base_title"
-done > /tmp/book_data.txt
+    # Extract date part for sorting
+    date_part=$(echo "$title" | grep -o '[0-9]\{4\}\.[0-9]\{2\}\.[0-9]\{2\}' || echo "")
+    
+    # Only process if we have a valid date format (some books might not follow this pattern)
+    if [ ! -z "$date_part" ]; then
+        echo "$id|$title|$pub_name|$date_part" >> "$TEMP_DIR/book_data.txt"
+    fi
+done
 
-# Process the data to identify duplicates
-echo "[INFO] Processing duplicates..."
-cat /tmp/book_data.txt | awk -F'|' '{print $3}' | sort | uniq > /tmp/unique_base_titles.txt
+# Check if we found any books matching our pattern
+if [ ! -f "$TEMP_DIR/book_data.txt" ] || [ ! -s "$TEMP_DIR/book_data.txt" ]; then
+    log "INFO" "No books with expected date pattern found in the library"
+    exit 0
+fi
 
-# For each base title, find all occurrences and keep only the newest one
-while read -r base_title; do
+# Get unique publication names
+cut -d'|' -f3 "$TEMP_DIR/book_data.txt" | sort | uniq > "$TEMP_DIR/unique_publications.txt"
+
+# Process each publication to find and remove duplicates
+while read -r pub_name; do
     # Skip empty lines
-    [ -z "$base_title" ] && continue
+    [ -z "$pub_name" ] && continue
     
-    echo "[INFO] Processing duplicates of: $base_title"
+    log "INFO" "Processing duplicates for: $pub_name"
     
-    # Find all IDs for this base title
-    grep "|$base_title\$" /tmp/book_data.txt | grep -v "|$base_title|$base_title\$" > /tmp/matches.txt
-    grep "|$base_title|$base_title\$" /tmp/book_data.txt >> /tmp/matches.txt
+    # Find all books for this publication and sort by date (newest first)
+    grep "^[0-9]*|.*|$pub_name|" "$TEMP_DIR/book_data.txt" | sort -t'|' -k4 -r > "$TEMP_DIR/matched_books.txt"
     
-    # If there's only one or no matches, continue to next base title
-    match_count=$(wc -l < /tmp/matches.txt)
+    # Count matches
+    match_count=$(wc -l < "$TEMP_DIR/matched_books.txt")
     if [ "$match_count" -le 1 ]; then
-        echo "[INFO] No duplicates found for: $base_title"
+        log "INFO" "No duplicates found for: $pub_name (only $match_count copies)"
         continue
     fi
     
-    # Sort by ID in descending order and keep only the first one (newest)
-    cat /tmp/matches.txt | sort -t'|' -k1,1nr > /tmp/sorted_matches.txt
+    # Get the newest book (first line after sorting)
+    newest_book=$(head -1 "$TEMP_DIR/matched_books.txt")
+    newest_id=$(echo "$newest_book" | cut -d'|' -f1)
+    newest_title=$(echo "$newest_book" | cut -d'|' -f2)
     
-    # Extract the newest ID (first in sorted list)
-    newest_id=$(head -1 /tmp/sorted_matches.txt | cut -d'|' -f1)
-    newest_title=$(head -1 /tmp/sorted_matches.txt | cut -d'|' -f2)
+    log "INFO" "Keeping newest version: $newest_id - $newest_title"
     
-    echo "[INFO] Keeping newest version: $newest_id - $newest_title"
+    # Process books to remove (all except the newest)
+    tail -n +2 "$TEMP_DIR/matched_books.txt" | while read -r book_to_remove; do
+        id_to_remove=$(echo "$book_to_remove" | cut -d'|' -f1)
+        title_to_remove=$(echo "$book_to_remove" | cut -d'|' -f2)
+        
+        log "INFO" "Removing duplicate: $id_to_remove - $title_to_remove"
+        
+        if ! calibredb remove --with-library="$LIBRARY_PATH" --permanent "$id_to_remove"; then
+            log "WARNING" "Failed to remove book ID $id_to_remove"
+        fi
+    done
     
-    # Get IDs to remove (all except the newest)
-    tail -n +2 /tmp/sorted_matches.txt | cut -d'|' -f1 > /tmp/ids_to_remove.txt
+    # Count how many were removed
+    removed_count=$((match_count - 1))
+    log "INFO" "Removed $removed_count duplicates of $pub_name"
     
-    # Remove duplicates
-    while read -r id_to_remove; do
-        title_to_remove=$(grep "^$id_to_remove|" /tmp/book_data.txt | cut -d'|' -f2)
-        echo "[INFO] Removing duplicate: $id_to_remove - $title_to_remove"
-        calibredb remove --with-library="$LIBRARY_PATH" "$id_to_remove" || echo "[WARNING] Failed to remove book ID $id_to_remove"
-    done < /tmp/ids_to_remove.txt
-done < /tmp/unique_base_titles.txt
+done < "$TEMP_DIR/unique_publications.txt"
 
-# Clean up temporary files
-rm -f /tmp/book_data.txt /tmp/unique_base_titles.txt /tmp/matches.txt /tmp/sorted_matches.txt /tmp/ids_to_remove.txt
-
-echo "[INFO] Duplicate cleanup completed successfully!"
+log "INFO" "Duplicate cleanup completed successfully"

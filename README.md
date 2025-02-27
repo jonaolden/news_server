@@ -1,51 +1,150 @@
-# Calibre News Server
+# News Server
 
-This project manages a Docker container running a Calibre server that downloads news recipes and imports them as EPUB files. Recipes can be updated on a schedule via cron and optionally pulled from a GitHub repository.
+A Docker-based solution for automatically downloading news content using Calibre recipes, storing them in a Calibre library, and serving them via a web interface. Ideal for creating your personal news archive.
+
+## Features
+
+- **Automated News Downloads**: Schedule news collection via cron
+- **Multiple News Sources**: Supports any site with a Calibre recipe
+- **Web Interface**: Access your news via Calibre's web server
+- **Recipe Management**: Optionally pull recipes from a Git repository
+- **Duplicate Management**: Automatically handles duplicate publications
+- **Docker-based**: Easy deployment on any platform supporting Docker
+- **Persistent Storage**: Keeps your news library safe between container updates
 
 ## Quick Start
 
-1. **Set Up .env**  
-Create a file named .env in the repository root. Copy the contents from .env.example (if provided) or create your own, specifying values for the following:
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- Basic understanding of environment variables and Docker concepts
+
+### Setup
+
+1. **Clone this repository**:
 
 ```bash
-CRON_TIME="0 6 * * * *"
+git clone https://github.com/jonaolden/news_server.git
+cd news_server
+```
 
-GITHUB_REPO_URL="https://github.com/username/my-recipe-repo.git"
+2. **Configure Environment**:
 
+Create a `.env` file based on the example:
+
+```bash
+cp .env.example .env
+```
+
+Edit the `.env` file to customize settings:
+
+```bash
+# Set your preferred cron schedule 
+CRON_TIME="0 0 * * *"  # Daily at midnight
+
+# Set secure credentials
 CALIBRE_USER="admin"
-CALIBRE_PASSWORD=your_secure_password
+CALIBRE_PASSWORD="your_secure_password"
+
+# Optional: Set repository for recipes 
+GITHUB_REPO_URL="https://github.com/username/my-recipes.git"
 ```
 
-2. **Run Docker Compose**
+3. **Run the Container**:
 
 ```bash
-docker-compose up --build
+docker-compose up -d
 ```
 
-3. **Access the Server**
+4. **Access Your News**:
 
-The Calibre server is exposed on port 8080, so visit [http://localhost:8080](http://localhost:8080) (adjust if you're running Docker on another host)
-The library folder is mounted to /opt/library for data persistence.
+Open your browser and navigate to [http://localhost:8080](http://localhost:8080)
 
-## Automatic Recipe Updates
+Login with the username/password you specified in the `.env` file.
 
-* A cron job runs at the schedule specified in CRON_TIME.
-* Before converting recipes, it will do a git pull if you have provided a GitHub repository.
-* Each news publication is converted to EPUB format with a consistent naming convention.
-* Old versions of publications are automatically deleted and replaced with new ones.
+## Recipe Management
 
-## Managing Duplicates
+### Adding Recipe Files
 
-By default, the system is set up to automatically handle duplicates by removing older versions of the same publication before adding new ones. This ensures your library stays clean and organized.
+Recipe files should be placed in the `recipes` folder with a `.recipe` extension. The file name (without extension) will be used as the publication name in the library.
 
-If you have existing duplicates in your library, you can run the included `cleanup_duplicates.sh` script to remove them:
+For example, a recipe file named `economist.recipe` will create a publication titled `economist - YYYY.MM.DD` in the library, where the date represents when the publication was downloaded.
+
+### Using Git for Recipe Management
+
+If you provide a `GITHUB_REPO_URL` in your `.env` file, the container will:
+- On first run: Clone the repository into the recipes folder
+- On subsequent runs: Pull the latest changes
+
+This allows you to manage recipes in a separate repository and have them automatically updated in your news server.
+
+## Managing the Library
+
+### Duplicates
+
+By default, older versions of a publication are automatically removed when new versions are downloaded. This keeps your library clean.
+
+If you have existing duplicates in your library, you can run the included cleanup script:
 
 ```bash
 docker-compose exec calibre-server /bin/bash -c "bash /opt/cleanup_duplicates.sh"
 ```
 
-## Recipe Files
+### Manually Triggering Downloads
 
-Recipe files should be placed in the `recipes` folder with a `.recipe` extension. The file name (without extension) will be used as the publication name in the library.
+To manually trigger a news download:
 
-For example, a recipe file named `economist.recipe` will create a publication titled `economist - YYYY.MM.DD` in the library, where the date represents when the publication was downloaded.
+```bash
+docker-compose exec calibre-server /bin/bash -c "su - calibre -c 'bash /opt/download_news.sh'"
+```
+
+## Customization
+
+### Custom Recipes
+
+To create your own recipes, see [Calibre's recipe creation guide](https://manual.calibre-ebook.com/news.html).
+
+### Changing Download Schedule
+
+Modify the `CRON_TIME` value in your `.env` file. The format is:
+
+```
+minute hour day-of-month month day-of-week
+```
+
+For example:
+- `0 */6 * * *`: Every 6 hours
+- `0 8 * * 1-5`: Weekdays at 8am
+- `0 8,18 * * *`: Daily at 8am and 6pm
+
+After changing, restart your container:
+
+```bash
+docker-compose restart
+```
+
+## Troubleshooting
+
+### Viewing Logs
+
+To view logs:
+
+```bash
+docker-compose logs -f
+```
+
+Detailed logs are also stored in `/var/log/news_server/` inside the container and available in the `logs` directory on the host.
+
+### Common Issues
+
+- **No publications showing up**: Check if your recipes are valid and in the correct location
+- **Permission errors**: Check the ownership of mounted volumes
+- **Cron not running**: Check if your cron schedule is valid
+
+## Advanced Configuration
+
+See the `.env.example` file for all available configuration options with descriptions.
+
+## License
+
+This project is open source and available under the MIT License.

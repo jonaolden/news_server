@@ -11,35 +11,76 @@ CALIBRE_USER="${CALIBRE_USER:-admin}"
 CALIBRE_PASSWORD="${CALIBRE_PASSWORD:-admin}"
 DUP_STRATEGY="${DUPLICATE_STRATEGY:-new_record}"
 REPO_URL="${GITHUB_REPO_URL}"
+LOG_FILE="${LOG_FILE:-/var/log/news_download.log}"
 
-echo "[INFO] Using library path: $LIBRARY_PATH"
-echo "[INFO] Using recipes path: $RECIPES_PATH"
+# Function for logging with timestamps
+log() {
+    local level="$1"
+    local message="$2"
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" | tee -a "$LOG_FILE"
+}
+
+log "INFO" "Starting news download process"
+log "INFO" "Using library path: $LIBRARY_PATH"
+log "INFO" "Using recipes path: $RECIPES_PATH"
 
 # Check if directories are writable
 if [ ! -w "$RECIPES_PATH" ]; then
-    echo "[ERROR] Cannot write to $RECIPES_PATH - check permissions"
+    log "ERROR" "Cannot write to $RECIPES_PATH - check permissions"
     exit 1
 fi
 
 if [ ! -w "$LIBRARY_PATH" ]; then
-    echo "[ERROR] Cannot write to $LIBRARY_PATH - check permissions"
+    log "ERROR" "Cannot write to $LIBRARY_PATH - check permissions"
     exit 1
 fi
 
+# Create log directory if it doesn't exist
+LOG_DIR=$(dirname "$LOG_FILE")
+if [ ! -d "$LOG_DIR" ]; then
+    mkdir -p "$LOG_DIR" || {
+        log "ERROR" "Cannot create log directory $LOG_DIR"
+        # Continue anyway, logging to stdout
+    }
+fi
+
 # Clean up any leftover EPUB files from previous runs first
-echo "[INFO] Cleaning up any existing EPUB files before starting"
-find $RECIPES_PATH -name "*.epub" -delete || echo "[WARNING] Failed to clean up existing EPUB files"
+log "INFO" "Cleaning up any existing EPUB files before starting"
+find $RECIPES_PATH -name "*.epub" -delete || log "WARNING" "Failed to clean up existing EPUB files"
 
 # 1. If GitHub repository is defined, clone or pull
 if [ -n "$REPO_URL" ]; then
     if [ -d "$RECIPES_PATH/.git" ]; then
-        echo "[INFO] Found existing git repo in $RECIPES_PATH. Pulling latest..."
-        cd $RECIPES_PATH && git pull
+        log "INFO" "Found existing git repo in $RECIPES_PATH. Pulling latest..."
+        cd $RECIPES_PATH && git pull || log "ERROR" "Failed to pull from git repository"
     else
-        echo "[INFO] Cloning git repo: $REPO_URL into $RECIPES_PATH"
-        rm -rf "$RECIPES_PATH"/* # clean out any old non-git files
-        git clone "$REPO_URL" "$RECIPES_PATH"
+        log "INFO" "Cloning git repo: $REPO_URL into $RECIPES_PATH"
+        # Create a backup of existing recipes before cloning
+        BACKUP_DIR="/tmp/recipes_backup_$(date +%Y%m%d%H%M%S)"
+        mkdir -p "$BACKUP_DIR"
+        cp -r "$RECIPES_PATH"/* "$BACKUP_DIR"/ 2>/dev/null || log "WARNING" "No existing recipes to backup"
+        
+        # Clean out any old non-git files
+        rm -rf "$RECIPES_PATH"/* 
+        
+        # Clone the repository
+        if ! git clone "$REPO_URL" "$RECIPES_PATH"; then
+            log "ERROR" "Failed to clone git repository. Restoring backup."
+            rm -rf "$RECIPES_PATH"/*
+            cp -r "$BACKUP_DIR"/* "$RECIPES_PATH"/ 2>/dev/null
+            log "INFO" "Backup restored"
+        else
+            log "INFO" "Git clone successful"
+            rm -rf "$BACKUP_DIR"
+        fi
     fi
+fi
+
+# Check if we have any recipes
+recipe_count=$(find "$RECIPES_PATH" -name "*.recipe" | wc -l)
+if [ "$recipe_count" -eq 0 ]; then
+    log "WARNING" "No .recipe files found in $RECIPES_PATH. Nothing to download."
+    exit 0
 fi
 
 # 2. Convert recipes and add to library
@@ -50,50 +91,57 @@ for filename in $RECIPES_PATH/*.recipe; do
     publication=$(basename "$filename" .recipe)
     output_epub="$RECIPES_PATH/$publication.epub"
     
-    echo "[INFO] Converting recipe $filename to EPUB $output_epub"
+    log "INFO" "Converting recipe $filename to EPUB $output_epub"
     # Ensure we have write permission to the output file
-    touch "$output_epub" || { echo "[ERROR] Cannot create $output_epub - check permissions"; exit 1; }
-    
-    ebook-convert "$filename" "$output_epub" || { 
-        echo "[ERROR] Conversion failed for $filename";
-        continue;  # Try next recipe instead of failing completely
+    touch "$output_epub" || { 
+        log "ERROR" "Cannot create $output_epub - check permissions"
+        continue # Skip this recipe instead of exiting
     }
+    
+    # Convert with a reasonable timeout (30 minutes)
+    if ! timeout 1800 ebook-convert "$filename" "$output_epub"; then
+        log "ERROR" "Conversion failed or timed out for $filename"
+        continue  # Try next recipe instead of failing completely
+    fi
 
     if [ ! -f "$output_epub" ]; then
-        echo "[ERROR] Conversion produced no output file: $output_epub"
+        log "ERROR" "Conversion produced no output file: $output_epub"
         continue
     fi
 
-    echo "[INFO] Annotating EPUB $output_epub with 'dailynews' tag"
-    ebook-meta "$output_epub" --tag "dailynews" || echo "[WARNING] Failed to add tag to $output_epub"
+    log "INFO" "Annotating EPUB $output_epub with 'dailynews' tag"
+    ebook-meta "$output_epub" --tag "dailynews" || log "WARNING" "Failed to add tag to $output_epub"
     
     # Use consistent date-based title format for the publication
     today=$(date +"%Y.%m.%d")
     publication_title="$publication - $today"
-    echo "[INFO] Setting publication title to: $publication_title"
-    ebook-meta "$output_epub" --title "$publication_title" || echo "[WARNING] Failed to set title for $output_epub"
+    log "INFO" "Setting publication title to: $publication_title"
+    ebook-meta "$output_epub" --title "$publication_title" || log "WARNING" "Failed to set title for $output_epub"
 
     # First check for and remove existing entries with the same publication name
-    echo "[INFO] Checking for existing entries of $publication in the library"
+    log "INFO" "Checking for existing entries of $publication in the library"
     # Get list of book IDs that match the publication pattern
     book_ids=$(calibredb list --with-library="$LIBRARY_PATH" --search="title:$publication" --fields="id" | grep -o '[0-9]\+' || echo "")
     
     if [ ! -z "$book_ids" ]; then
-        echo "[INFO] Found existing entries for $publication. Removing them before adding new version."
+        log "INFO" "Found existing entries for $publication. Removing them before adding new version."
         for book_id in $book_ids; do
-            echo "[INFO] Removing book ID $book_id"
+            log "INFO" "Removing book ID $book_id"
             # Use --permanent flag to bypass the recycle bin and avoid home directory errors
-            calibredb remove --with-library="$LIBRARY_PATH" --permanent "$book_id" || echo "[WARNING] Failed to remove book ID $book_id"
+            calibredb remove --with-library="$LIBRARY_PATH" --permanent "$book_id" || log "WARNING" "Failed to remove book ID $book_id"
         done
     fi
 
-    echo "[INFO] Adding EPUB $output_epub to the library at $LIBRARY_PATH"
-    calibredb add "$output_epub" \
-        --with-library="$LIBRARY_PATH" || echo "[WARNING] Failed to add $output_epub to library"
+    log "INFO" "Adding EPUB $output_epub to the library at $LIBRARY_PATH"
+    if ! calibredb add "$output_epub" --with-library="$LIBRARY_PATH"; then
+        log "ERROR" "Failed to add $output_epub to library"
+    else
+        log "INFO" "Successfully added $publication_title to library"
+    fi
 done
 
 # 3. Clean up leftover epub files to avoid duplicates next time
-echo "[INFO] Cleaning up temporary EPUB files"
-find $RECIPES_PATH -name "*.epub" -delete || echo "[WARNING] Failed to clean up EPUB files"
+log "INFO" "Cleaning up temporary EPUB files"
+find $RECIPES_PATH -name "*.epub" -delete || log "WARNING" "Failed to clean up EPUB files"
 
-echo "[INFO] News download completed successfully"
+log "INFO" "News download completed successfully"

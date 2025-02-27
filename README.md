@@ -145,6 +145,51 @@ Detailed logs are also stored in `/var/log/news_server/` inside the container an
 
 See the `.env.example` file for all available configuration options with descriptions.
 
+## Future Development
+
+The following features are planned for future releases:
+
+### Web UI for Recipe Management
+- Graphical interface for managing recipes without command line
+- Browse and select recipes from multiple GitHub repositories
+- Enable/disable specific recipes
+- Edit recipe configurations through the UI
+- View download history and logs
+- For more details, see [Issue #1](https://github.com/jonaolden/news_server/issues/1)
+
+### Enhanced Scheduling
+- Per-recipe scheduling (different download frequencies for different sources)
+- More flexible retention policies
+- Email notifications for download failures
+
+### Library Management
+- Automated categorization of publications
+- Better search and filtering options
+- Integration with other e-reading platforms
+
+These planned features aim to make the news server more user-friendly and powerful while maintaining its simplicity for basic usage.
+
+## Testing
+
+To test your setup after making changes:
+
+1. Restart the container:
+   ```bash
+   docker-compose down && docker-compose up -d
+   ```
+
+2. Check logs for any errors:
+   ```bash
+   docker-compose logs -f
+   ```
+
+3. Run a manual download to verify recipe processing:
+   ```bash
+   docker-compose exec calibre-server /bin/bash -c "su - calibre -c 'bash /opt/download_news.sh'"
+   ```
+
+4. Access the web interface to confirm publications appear in the library
+
 ## License
 
 This project is open source and available under the MIT License.

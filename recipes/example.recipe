@@ -1,32 +1,102 @@
-from calibre.web.feeds.multy_feed import MultiFeedRecipe
-from calibre.web.feeds.feed_settings import *
+#!/usr/bin/env python
+# vim:fileencoding=utf-8
+import string, re
+from calibre.web.feeds.news import BasicNewsRecipe
+from calibre.ebooks.BeautifulSoup import BeautifulSoup
 
-class ConcreteMuliFeedRecipe(MultiFeedRecipe):
-#    cover_url = "http://example.com/rss.jpg"
-#    masthead_url = "http://example.com/files/rss.jpg"
-
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!
-# TODO: Adjust this setting!!!
-    download_history_file = "/home/user/kindle/history"
-
-    oldest_article = 7
-    max_articles_per_feed = 5
-
-    feeds          = [
-        ('IT happens', 'http://ithappens.ru/rss/'),
-        ('xkcd', 'http://xkcd.com/rss.xml'),
-        ('What If', 'http://what-if.xkcd.com/feed.atom'),
-        ('Linux.org.ru', 'http://feeds.feedburner.com/org/LOR'),
-# TODO: Adjust feed URL
-#        ('Habrahabr', 'http://example.com/rss_feed.php'),
-        ('Kommersant', 'http://dynamic.feedsportal.com/pf/438800/http://feeds.kommersant.ru/RSS_Export/RU/daily.xml'),
+class MediumReadingList(BasicNewsRecipe):
+    title          = 'Reading List'
+    description    = 'Latest articles from my reading list'
+    timefmt        = ''  # Don't append date to title
+    language       = 'en'
+    publication_type = 'blog'
+    oldest_article = 1
+    max_articles_per_feed = 1
+    no_stylesheets = True
+    auto_cleanup   = False
+    keep_only_tags = [dict(name='article')]
+    remove_tags    = [dict(name='img', width='1', height='1'), 
+                     dict(name='div', class_='speechify-ignore ab co'), 
+                     dict(name='article', class_='sf')]
+    extra_css      = 'img {max-width: 100%} \n div.paragraph-image {width:90%; margin-left: auto; margin-right: auto} \n div.paragraph-image div:nth-child(2) {font-size: 0.8rem; font-style: italic} \n p.separator {text-align: center} \n hr.line {border: none; border-top: 0.15em dashed black; margin: 3em 5% 2em 0}'
+    preprocess_regexps = [
+        (re.compile(r'<p id=".{0,6}" class="pw-post-body-paragraph lg lh ev li b lj lk ll lm ln lo lp lq lr ls lt lu lv lw lx ly lz ma mb mc md eo bj">◊◊◊</p>', re.DOTALL|re.IGNORECASE),
+         lambda match: '<p class="separator">◊◊◊</p>'),
+        (re.compile(r'<p id=".{0,6}" class="pw-post-body-paragraph lg lh ev li b lj lk ll lm ln lo lp lq lr ls lt lu lv lw lx ly lz ma mb mc md eo bj">_{10,100}?</p>', re.DOTALL|re.IGNORECASE),
+         lambda match: '<hr class="line"/>'),
     ]
-
-    feed_settings = {
-        'xkcd' : FeedXKCDSettings(),
-        'IT happens' : FeedFetchSettings(),
-        'Linux.org.ru' : FeedFetchSettings(),
-        'What If' : FeedWhatIfSettings(),
-        'Habrahabr' : FeedHabrahabrSettings(),
-        'Kommersant' : FeedKommersantSettings(),
-    }
+    
+    def parse_index(self):
+        feed_title = 'Medium Reading List'
+        articles = []
+        
+        # Use the Medium list URL instead of Reddit
+        medium_list_url = 'https://medium.com/@jonatanoldenburg/list/reading-list'
+        soup = self.index_to_soup(medium_list_url)
+        
+        # Find all article entries in the list
+        # Medium lists have articles in sections with article elements
+        article_elements = soup.find_all('article')
+        
+        for article in article_elements:
+            # Extract the title - typically in an h2 or h3 element
+            title_elem = article.find(['h2', 'h3'])
+            if not title_elem:
+                continue
+                
+            title = title_elem.get_text().strip()
+            
+            # Get the link to the article
+            link_elem = article.find('a')
+            if not link_elem:
+                continue
+                
+            url = link_elem.get('href')
+            # Make sure URL is absolute
+            if url.startswith('/'):
+                url = 'https://medium.com' + url
+                
+            # Try to get date if available
+            date = ''
+            date_elem = article.find('time')
+            if date_elem:
+                date = date_elem.get_text().strip()
+            
+            # Add article to the list
+            articles.append(dict(title=title, url=url, date=date))
+        
+        if not articles:
+            self.log.warning('No articles found in the Medium Reading List')
+        
+        return [(feed_title, articles)]
+    
+    def preprocess_html(self, soup):
+        # Process images - Medium uses picture elements with multiple sources
+        picture_elements = soup.find_all('picture')
+        for picture in picture_elements:
+            # Try to get the highest quality image
+            source = picture.find('source', attrs={'type': 'image/webp'})
+            if source and 'srcset' in source.attrs:
+                img_links = source['srcset']
+                # Extract the highest quality image URL
+                img_link = re.sub(r'https://miro\.medium\.com/v2/resize:fit:\d{2,4}/(format:webp/)?(.+?)(\.png|\.jpg|\.gif)?\s.+\d{2,4}w', 
+                                  r'https://miro.medium.com/v2/\1\2\3', 
+                                  img_links, count=1)
+                
+                # Update the img src attribute
+                img = picture.find('img')
+                if img:
+                    img['src'] = img_link
+        
+        return soup
+    
+    def postprocess_html(self, soup, first_fetch):
+        # Clean up HTML
+        for source in soup.find_all('source'):
+            source.decompose()  # Remove source tags
+        
+        for x in soup.find_all('span'):
+            if len(x.get_text()) == 0:
+                x.unwrap()  # Remove empty spans
+        
+        return soup

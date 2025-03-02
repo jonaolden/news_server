@@ -1,0 +1,35 @@
+import string, re
+from calibre import strftime
+from calibre.web.feeds.recipes import BasicNewsRecipe
+from calibre.ebooks.BeautifulSoup import BeautifulSoup
+
+class AdvancedUserRecipe1334031382(BasicNewsRecipe):
+    title          = u'<name>'
+    oldest_article = 400
+    max_articles_per_feed = 150
+    no_stylesheets = True
+    remove_javascript = True
+    
+    remove_tags_before = dict(id='story')
+    remove_tags_after = dict(id='story')
+
+    remove_tags = [
+        dict(name='div', attrs={'class':'share clearfix'}),
+        dict(name='div', attrs={'class':'publish-meta clearfix'}),        
+        dict(name='div', attrs={'class':'modal-header'}),
+        dict(name='a', attrs={'class':'buttons prev'}),
+        dict(name='div', attrs={'class':'viewport'}),
+        dict(name='a', attrs={'class':'buttons next'}),
+        dict(name='div', attrs={'class':'box related-images'}),
+        dict(name='div', attrs={'class':'caption round4-bottom'}),
+        dict(name='div', attrs={'class':'magnify'}),
+        dict(name='div', attrs={'class':'box related-links'}),
+        dict(name='div', attrs={'class':'tags clearfix'}),
+        dict(name='div', attrs={'class':'view-comments'}),
+        dict(name='div', attrs={'id':'comment-container'}),
+        dict(name='div', attrs={'class':'related-block stories clearfix'}),
+        dict(name='div', attrs={'class':'related-block clearfix'}),
+        dict(name='div', attrs={'class':'OUTBRAIN'})
+    ]
+    
+    feeds          = [(u'<name>', u'<feed>')]

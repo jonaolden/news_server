@@ -17,7 +17,12 @@ LOG_FILE="${LOG_FILE:-/var/log/news_download.log}"
 log() {
     local level="$1"
     local message="$2"
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message" | tee -a "$LOG_FILE"
+    local timestamp="[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message"
+    echo "$timestamp"
+    # Only try to write to log file if we have permissions
+    if [ -w "$LOG_DIR" ] || [ -w "$LOG_FILE" ]; then
+        echo "$timestamp" >> "$LOG_FILE"
+    fi
 }
 
 log "INFO" "Starting news download process"
@@ -112,25 +117,9 @@ for filename in $RECIPES_PATH/*.recipe; do
     log "INFO" "Annotating EPUB $output_epub with 'dailynews' tag"
     ebook-meta "$output_epub" --tag "dailynews" || log "WARNING" "Failed to add tag to $output_epub"
     
-    # Use consistent date-based title format for the publication
-    today=$(date +"%Y.%m.%d")
-    publication_title="$publication - $today"
-    log "INFO" "Setting publication title to: $publication_title"
-    ebook-meta "$output_epub" --title "$publication_title" || log "WARNING" "Failed to set title for $output_epub"
-
-    # First check for and remove existing entries with the same publication name
-    log "INFO" "Checking for existing entries of $publication in the library"
-    # Get list of book IDs that match the publication pattern
-    book_ids=$(calibredb list --with-library="$LIBRARY_PATH" --search="title:$publication" --fields="id" | grep -o '[0-9]\+' || echo "")
-    
-    if [ ! -z "$book_ids" ]; then
-        log "INFO" "Found existing entries for $publication. Removing them before adding new version."
-        for book_id in $book_ids; do
-            log "INFO" "Removing book ID $book_id"
-            # Use --permanent flag to bypass the recycle bin and avoid home directory errors
-            calibredb remove --with-library="$LIBRARY_PATH" --permanent "$book_id" || log "WARNING" "Failed to remove book ID $book_id"
-        done
-    fi
+    # Just use the publication name as the title (no dates)
+    log "INFO" "Setting publication title to: $publication"
+    ebook-meta "$output_epub" --title "$publication" || log "WARNING" "Failed to set title for $output_epub"
 
     log "INFO" "Adding EPUB $output_epub to the library at $LIBRARY_PATH"
     if ! calibredb add "$output_epub" --with-library="$LIBRARY_PATH"; then

@@ -4,6 +4,7 @@ set -e
 # Basic paths
 LIBRARY_PATH="${LIBRARY_FOLDER:-/opt/library}"
 RECIPES_PATH="${RECIPES_FOLDER:-/opt/recipes}"
+DUPLICATE_STRATEGY="${DUPLICATE_STRATEGY:-overwrite}"
 
 # Process each recipe
 for recipe in "$RECIPES_PATH"/*.recipe; do
@@ -14,7 +15,7 @@ for recipe in "$RECIPES_PATH"/*.recipe; do
     
     echo "Processing: $recipe"
     if ebook-convert "$recipe" "$output_epub"; then
-        calibredb add "$output_epub" --with-library="$LIBRARY_PATH" --duplicates overwrite && \
+        calibredb add "$output_epub" --with-library="$LIBRARY_PATH" --duplicates "$DUPLICATE_STRATEGY" && \
         echo "Successfully processed $publication"
         rm -f "$output_epub"
     fi

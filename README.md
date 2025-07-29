@@ -84,6 +84,10 @@ This allows you to manage recipes in a separate repository and have them automat
 
 By default, older versions of a publication are automatically removed when new versions are downloaded. This keeps your library clean.
 
+You can control this behaviour via the `DUPLICATE_STRATEGY` environment variable.
+Set it to `overwrite`, `new_record`, or `ignore` to pass the corresponding value
+to `calibredb` when new publications are added. The default is `overwrite`.
+
 If you have existing duplicates in your library, you can run the included cleanup script:
 
 ```bash

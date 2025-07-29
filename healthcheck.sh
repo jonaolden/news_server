@@ -46,7 +46,8 @@ if [ ! -r "$RECIPES_FOLDER" ]; then
 fi
 
 # Check if there are any recipe files
-if [ ! "$(find "$RECIPES_FOLDER" -name "*.recipe" | wc -l)" -gt 0 ]; then
+recipe_count=$(find "$RECIPES_FOLDER" -name "*.recipe" | wc -l)
+if [ "$recipe_count" -eq 0 ]; then
     log "WARNING" "No recipe files found in $RECIPES_FOLDER"
     # Not fatal but might indicate an issue
 fi

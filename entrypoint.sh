@@ -12,6 +12,7 @@ export CALIBRE_USER="${CALIBRE_USER:-admin}"
 export CALIBRE_PASSWORD="${CALIBRE_PASSWORD:-admin}"
 export LOG_DIR="${LOG_DIR:-/var/log/news_server}"
 export LOG_FILE="${LOG_DIR}/news_download.log"
+export GITHUB_REPO_URL="${GITHUB_REPO_URL:-}"
 
 # Function for logging with timestamps
 log() {
@@ -35,6 +36,23 @@ fi
 log "INFO" "Setting permissions on mounted volumes"
 chown -R calibre:calibre "$LIBRARY_FOLDER" "$RECIPES_FOLDER" "$USER_DB" "$LOG_DIR"
 chmod -R 755 "$LIBRARY_FOLDER" "$RECIPES_FOLDER" "$LOG_DIR"
+
+# Clone or update recipes from GitHub if a repository is specified
+if [ -n "$GITHUB_REPO_URL" ]; then
+    if [ -d "$RECIPES_FOLDER/.git" ]; then
+        log "INFO" "Updating recipes from $GITHUB_REPO_URL"
+        if ! git -C "$RECIPES_FOLDER" pull --ff-only; then
+            log "WARNING" "Failed to update recipes from $GITHUB_REPO_URL"
+        fi
+    else
+        log "INFO" "Cloning recipes from $GITHUB_REPO_URL"
+        if git clone "$GITHUB_REPO_URL" "$RECIPES_FOLDER"; then
+            chown -R calibre:calibre "$RECIPES_FOLDER"
+        else
+            log "WARNING" "Failed to clone recipes from $GITHUB_REPO_URL"
+        fi
+    fi
+fi
 
 # Create initial calibre user if not exists
 if [ ! -s "$USER_DB" ]; then
